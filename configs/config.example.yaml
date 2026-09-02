@@ -1,0 +1,57 @@
+# Скопируйте в config.yaml рядом с бинарником и заполните секреты.
+log_level: info
+
+discord:
+  client_id: "1544770992914563253"
+  # Developer Portal → OAuth2 → Client Secret. НЕ коммитить.
+  client_secret: ""
+  # Должен быть добавлен в OAuth2 → Redirects (точное совпадение строки).
+  redirect_uri: "http://localhost:7788/oauth/callback"
+  scopes:
+    - rpc            # доступ к локальному RPC
+    - rpc.voice.read # чтение состояния голоса (mute/deaf/speaking)
+  token_file: "token.json"
+  pipe_range: 10     # перебирать discord-ipc-0 .. discord-ipc-9
+
+hyperhdr:
+  host: "127.0.0.1"
+  json_port: 19444
+  token: ""          # если в HyperHDR включена авторизация по API-токену
+  priority: 50       # меньше = важнее; 50 перебьёт обычный захват экрана
+  origin: "discord-bridge"
+  restore_on_exit: true
+
+web:
+  enabled: true
+  addr: "127.0.0.1:7788"
+  open_on_start: false
+
+rules:
+  enabled: true
+  debounce_ms: 120
+  # Первое совпавшее состояние выигрывает — порядок важен.
+  # speaking сознательно не используется: Discord дёргает SPEAKING_START/STOP
+  # на каждой паузе в речи, подсветка от этого мигает.
+  order: [deafened, muted, connected]
+  states:
+    # blink_count: мигнуть цветом N раз (в паузах видно обычный захват экрана),
+    # после чего цвет остаётся гореть, пока состояние активно.
+    # hold: false — только мигнуть и сразу вернуть подсветку HyperHDR.
+    deafened:
+      type: color
+      color: [255, 0, 0]
+      blink_count: 1
+      blink_on_ms: 220
+      blink_off_ms: 180
+    muted:
+      type: color
+      color: [255, 140, 0]
+      blink_count: 1
+      blink_on_ms: 220
+      blink_off_ms: 180
+    # Просто «в канале» подсветку не занимаем — HyperHDR работает как обычно.
+    connected:
+      type: clear
+  # Когда не подключён к голосовому каналу — вернуть подсветку как было.
+  idle:
+    type: clear

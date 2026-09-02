@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Discord → HyperHDR</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 14px/1.5 system-ui, sans-serif; background:#16181d; color:#e6e8ec; margin:0; padding:24px; }
+  h1 { font-size:18px; margin:0 0 16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; max-width:860px; }
+  .card { background:#1e2128; border:1px solid #2b2f38; border-radius:10px; padding:12px 14px; }
+  .k { color:#8b93a1; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .v { font-size:16px; font-weight:600; margin-top:2px; }
+  .on { color:#4ade80; } .off { color:#6b7280; }
+  pre { background:#12141a; padding:12px; border-radius:8px; overflow:auto; max-width:860px; }
+  .row { display:flex; align-items:center; gap:12px; max-width:860px; }
+  .row .text { flex:1; }
+  .hint { color:#8b93a1; font-size:12px; margin-top:2px; }
+  .hint.warn { color:#fbbf24; }
+  /* Переключатель: чекбокс спрятан, вид рисует .switch. */
+  .switch { position:relative; width:44px; height:24px; flex:none; }
+  .switch input { position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; }
+  .switch .track { position:absolute; inset:0; background:#3a3f4b; border-radius:999px; transition:background .15s; pointer-events:none; }
+  .switch .track::after { content:''; position:absolute; top:3px; left:3px; width:18px; height:18px;
+    border-radius:50%; background:#e6e8ec; transition:transform .15s; }
+  .switch input:checked + .track { background:#4ade80; }
+  .switch input:checked + .track::after { transform:translateX(20px); }
+  .switch input:disabled { cursor:not-allowed; }
+  .switch input:disabled + .track { opacity:.4; }
+</style>
+</head>
+<body>
+<h1>Discord → HyperHDR</h1>
+<div class="grid" id="cards"></div>
+<h1 style="margin-top:24px">Настройки</h1>
+<div class="card row" style="max-width:860px">
+  <div class="text">
+    <div class="v">Запускать при входе в Windows</div>
+    <div class="hint" id="auto-hint">…</div>
+  </div>
+  <label class="switch">
+    <input type="checkbox" id="auto" disabled>
+    <span class="track"></span>
+  </label>
+</div>
+
+<h1 style="margin-top:24px">Состояние (raw)</h1>
+<pre id="raw">…</pre>
+
+<script>
+// TODO: редактор правил (цвет на состояние), кнопка «примерить», статус HyperHDR.
+const FIELDS = [
+  ['connected', 'В голосовом канале'],
+  ['self_mute', 'Микрофон выкл.'],
+  ['self_deaf', 'Звук выкл.'],
+  ['server_mute','Мут сервером'],
+  ['server_deaf','Заглушен сервером'],
+];
+function render(s) {
+  document.getElementById('cards').innerHTML = FIELDS.map(([k, label]) =>
+    `<div class="card"><div class="k">${label}</div>
+     <div class="v ${s[k] ? 'on' : 'off'}">${s[k] ? 'да' : 'нет'}</div></div>`
+  ).join('');
+  document.getElementById('raw').textContent = JSON.stringify(s, null, 2);
+}
+// Автозапуск: состояние тянем с /api/autostart, переключаем POST-ом.
+const auto = document.getElementById('auto');
+const autoHint = document.getElementById('auto-hint');
+
+function renderAuto(st) {
+  if (!st.supported) {
+    auto.checked = false;
+    auto.disabled = true;
+    autoHint.className = 'hint';
+    autoHint.textContent = 'Автозапуск доступен только в Windows.';
+    return;
+  }
+  auto.checked = st.enabled;
+  auto.disabled = false;
+  if (st.error) {
+    autoHint.className = 'hint warn';
+    autoHint.textContent = 'Ошибка: ' + st.error;
+  } else if (st.stale) {
+    autoHint.className = 'hint warn';
+    autoHint.textContent = 'В автозапуске прописана другая копия программы: ' + st.command +
+      '. Выключите и включите переключатель, чтобы обновить запись.';
+  } else {
+    autoHint.className = 'hint';
+    autoHint.textContent = st.enabled
+      ? 'Прописано в автозапуске: ' + st.command
+      : 'Мост придётся запускать вручную.';
+  }
+}
+
+async function loadAuto() {
+  try {
+    renderAuto(await (await fetch('/api/autostart')).json());
+  } catch (e) {
+    autoHint.className = 'hint warn';
+    autoHint.textContent = 'Не удалось узнать состояние автозапуска.';
+  }
+}
+
+auto.addEventListener('change', async () => {
+  const want = auto.checked;
+  auto.disabled = true;
+  try {
+    const r = await fetch('/api/autostart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: want }),
+    });
+    if (!r.ok) throw new Error((await r.text()).trim());
+    renderAuto(await r.json());
+  } catch (e) {
+    auto.checked = !want; // не получилось — возвращаем переключатель назад
+    auto.disabled = false;
+    autoHint.className = 'hint warn';
+    autoHint.textContent = 'Не удалось изменить автозапуск: ' + e.message;
+  }
+});
+
+loadAuto();
+
+const es = new EventSource('/api/events');
+es.onmessage = (e) => render(JSON.parse(e.data));
+es.onerror = () => console.warn('SSE отвалился, браузер переподключится сам');
+</script>
+</body>
+</html>
