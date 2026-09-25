@@ -1,6 +1,6 @@
 {
   "id": "hyperhdr-bridge",
-  "name": "Подсветка",
+  "name": "HyperHDR Bridge",
   "description": "Мигает и меняет цвет подсветки HyperHDR по статусу в Discord и событиям CS2",
   "icon": "lightbulb",
   "hue": 45,
