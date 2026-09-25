@@ -7,7 +7,7 @@
   "kind": "exe",
   "entry": "bridge.exe",
   "preserve": ["config.yaml", "token.json", "bridge.log"],
-  "exclude": ["*.md", "config.yaml", "token.json", "bridge.log", "*.pid", "*.out", "*.err"],
+  "exclude": ["*.md", "*probe.exe", "config.yaml", "token.json", "bridge.log", "*.pid", "*.out", "*.err"],
   "requirements": [
     { "label": "Windows 10 или 11", "check": { "type": "os", "min": "10.0.19041" } },
     { "label": "Discord (десктоп)", "check": { "type": "app", "name": "Discord", "exe": "Discord.exe" } },

@@ -28,9 +28,8 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
+          # rpcprobe и gsiprobe — инструменты разработчика, в релиз не идут.
           go build -trimpath -ldflags "-H=windowsgui -s -w -X main.version=${VERSION}" -o dist/bridge.exe ./cmd/bridge
-          go build -trimpath -ldflags "-s -w" -o dist/rpcprobe.exe ./cmd/rpcprobe
-          go build -trimpath -ldflags "-s -w" -o dist/gsiprobe.exe ./cmd/gsiprobe
           cp configs/config.example.yaml dist/
 
       - name: Пакет для Stash
@@ -45,7 +44,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
-            dist/bridge.exe dist/rpcprobe.exe dist/gsiprobe.exe \
+            dist/bridge.exe \
             stash-out/stash.json stash-out/files.json stash-out/package.zip \
             --title "Discord → HyperHDR Bridge ${GITHUB_REF_NAME}" \
             --generate-notes
