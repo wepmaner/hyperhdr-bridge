@@ -39,7 +39,7 @@ jobs:
         env:
           GOOS: ''
           GOARCH: ''
-        run: go run github.com/wepmaner/stash-pack/cmd/stash-pack@v0.1.1 -dir dist -manifest stash.json -version "${GITHUB_REF_NAME}" -out stash-out
+        run: go run github.com/wepmaner/stash-pack/cmd/stash-pack@v0.1.3 -dir dist -manifest stash.json -version "${GITHUB_REF_NAME}" -out stash-out
 
       - name: Что нового
         # Тег с текстом (git tag -a v1.2.0 -m "…") — берём его. Обычный тег — заголовки
@@ -67,7 +67,7 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             dist/bridge.exe \
-            stash-out/stash.json stash-out/files.json stash-out/package.zip \
+            stash-out/* \
             --title "HyperHDR Bridge ${GITHUB_REF_NAME}" \
             --notes-file notes.md
 
