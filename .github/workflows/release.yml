@@ -48,4 +48,13 @@ jobs:
             stash-out/stash.json stash-out/files.json stash-out/package.zip \
             --title "Discord → HyperHDR Bridge ${GITHUB_REF_NAME}" \
             --generate-notes
-      # Когда появится Worker Stash, здесь будет шаг «обновить каталог сейчас».
+
+      - name: Обновить каталог Stash
+        # Иначе друзья увидят релиз только через ≤30 минут, по cron Worker'а.
+        # continue-on-error: релиз уже опубликован, падение пинга его не отменяет.
+        continue-on-error: true
+        env:
+          STASH_CI_TOKEN: ${{ secrets.STASH_CI_TOKEN }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer ${STASH_CI_TOKEN}" \
+            "https://stash.stash-worker.workers.dev/v1/admin/refresh?app=hyperhdr-bridge"
