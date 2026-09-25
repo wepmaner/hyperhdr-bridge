@@ -19,6 +19,8 @@ jobs:
       CGO_ENABLED: '0'
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # вся история и теги — для «Что нового»
 
       - uses: actions/setup-go@v6
         with:
@@ -39,6 +41,23 @@ jobs:
           GOARCH: ''
         run: go run github.com/wepmaner/stash-pack/cmd/stash-pack@v0.1.1 -dir dist -manifest stash.json -version "${GITHUB_REF_NAME}" -out stash-out
 
+      - name: Что нового
+        # Тег с текстом (git tag -a v1.2.0 -m "…") — берём его. Обычный тег — заголовки
+        # коммитов с прошлого релиза. --generate-notes не годится: он собирает описание
+        # из pull request'ов, а без них выдаёт только ссылку на историю.
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          git fetch --force --tags --quiet   # checkout может сделать аннотированный тег «лёгким»
+          if [ "$(git cat-file -t "$tag")" = "tag" ]; then
+            git tag -l --format='%(contents)' "$tag" | sed '/-----BEGIN PGP/,$d' > notes.md
+          else
+            prev=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)
+            git log --no-merges --format='%s' ${prev:+$prev..}"$tag" \
+              | grep -vE '^[[:space:].]*$' | sed 's/^/- /' > notes.md
+          fi
+          [ -s notes.md ] || echo "- Без описания" > notes.md
+          cat notes.md
+
       - name: Релиз
         env:
           GH_TOKEN: ${{ github.token }}
@@ -46,8 +65,8 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             dist/bridge.exe \
             stash-out/stash.json stash-out/files.json stash-out/package.zip \
-            --title "Discord → HyperHDR Bridge ${GITHUB_REF_NAME}" \
-            --generate-notes
+            --title "HyperHDR Bridge ${GITHUB_REF_NAME}" \
+            --notes-file notes.md
 
       - name: Обновить каталог Stash
         # Иначе друзья увидят релиз только через ≤30 минут, по cron Worker'а.
