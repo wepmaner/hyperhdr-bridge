@@ -49,7 +49,10 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           git fetch --force --tags --quiet   # checkout может сделать аннотированный тег «лёгким»
           if [ "$(git cat-file -t "$tag")" = "tag" ]; then
-            git tag -l --format='%(contents)' "$tag" | sed '/-----BEGIN PGP/,$d' > notes.md
+            # git вырезает из текста тега строки на «#», поэтому раздел пишется как
+            # «Добавлено:» — строка с двоеточием на конце становится заголовком.
+            git tag -l --format='%(contents)' "$tag" | sed '/-----BEGIN PGP/,$d' \
+              | sed -E 's/^([^-#[:space:]].*):[[:space:]]*$/## \1/' > notes.md
           else
             prev=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)
             git log --no-merges --format='%s' ${prev:+$prev..}"$tag" \
