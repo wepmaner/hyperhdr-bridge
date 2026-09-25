@@ -1,0 +1,52 @@
+# Релиз по тегу: git tag v0.2.0 && git push --tags
+# Собирает exe с версией, упаковывает для Stash и публикует GitHub Release.
+# Сборка на Linux: Go собирает Windows-exe и оттуда, а минуты Linux дешевле.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GOOS: windows
+      GOARCH: amd64
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Сборка
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          go build -trimpath -ldflags "-H=windowsgui -s -w -X main.version=${VERSION}" -o dist/bridge.exe ./cmd/bridge
+          go build -trimpath -ldflags "-s -w" -o dist/rpcprobe.exe ./cmd/rpcprobe
+          go build -trimpath -ldflags "-s -w" -o dist/gsiprobe.exe ./cmd/gsiprobe
+          cp configs/config.example.yaml dist/
+
+      - name: Пакет для Stash
+        # stash-pack — это инструмент сборки, а не часть моста: запускаем под Linux.
+        env:
+          GOOS: ''
+          GOARCH: ''
+        run: go run github.com/wepmaner/stash-pack/cmd/stash-pack@v0.1.1 -dir dist -manifest stash.json -version "${GITHUB_REF_NAME}" -out stash-out
+
+      - name: Релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/bridge.exe dist/rpcprobe.exe dist/gsiprobe.exe \
+            stash-out/stash.json stash-out/files.json stash-out/package.zip \
+            --title "Discord → HyperHDR Bridge ${GITHUB_REF_NAME}" \
+            --generate-notes
+      # Когда появится Worker Stash, здесь будет шаг «обновить каталог сейчас».

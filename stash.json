@@ -1,0 +1,16 @@
+{
+  "id": "hyperhdr-bridge",
+  "name": "Подсветка",
+  "description": "Мигает и меняет цвет подсветки HyperHDR по статусу в Discord и событиям CS2",
+  "icon": "lightbulb",
+  "hue": 45,
+  "kind": "exe",
+  "entry": "bridge.exe",
+  "preserve": ["config.yaml", "token.json", "bridge.log"],
+  "exclude": ["*.md", "config.yaml", "token.json", "bridge.log", "*.pid", "*.out", "*.err"],
+  "requirements": [
+    { "label": "Windows 10 или 11", "check": { "type": "os", "min": "10.0.19041" } },
+    { "label": "Discord (десктоп)", "check": { "type": "app", "name": "Discord", "exe": "Discord.exe" } },
+    { "label": "HyperHDR с включённым JSON-сервером", "check": { "type": "app", "name": "HyperHDR", "exe": "hyperhdr.exe" } }
+  ]
+}

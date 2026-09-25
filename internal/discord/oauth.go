@@ -45,12 +45,22 @@ func (t *Token) covers(scopes []string) bool {
 	return true
 }
 
+// tokenPath — абсолютный путь к кэшу токена. Config.Load заполняет TokenPath;
+// откат на TokenFile нужен для клиентов, собранных без загрузки конфига.
+func (c *Client) tokenPath() string {
+	if c.cfg.TokenPath != "" {
+		return c.cfg.TokenPath
+	}
+	return c.cfg.TokenFile
+}
+
 // dropToken удаляет кэш токена — вызывается, когда Discord его отверг.
 func (c *Client) dropToken() {
-	if c.cfg.TokenFile == "" {
+	path := c.tokenPath()
+	if path == "" {
 		return
 	}
-	if err := os.Remove(c.cfg.TokenFile); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		c.log.Warn("не удалось удалить кэш токена", "err", err)
 	}
 }
@@ -58,7 +68,7 @@ func (c *Client) dropToken() {
 // ensureToken возвращает валидный access_token:
 // кэш -> refresh -> интерактивный AUTHORIZE через RPC.
 func (c *Client) ensureToken(ctx context.Context) (string, error) {
-	tok, err := loadToken(c.cfg.TokenFile)
+	tok, err := loadToken(c.tokenPath())
 	if err != nil {
 		c.log.Debug("кэш токена не прочитан", "err", err)
 	}
@@ -70,7 +80,7 @@ func (c *Client) ensureToken(ctx context.Context) (string, error) {
 			"grant_type":    {"refresh_token"},
 			"refresh_token": {tok.RefreshToken},
 		}); err == nil {
-			_ = saveToken(c.cfg.TokenFile, fresh)
+			_ = saveToken(c.tokenPath(), fresh)
 			return fresh.AccessToken, nil
 		} else {
 			c.log.Warn("обновление токена не удалось", "err", err)
@@ -109,8 +119,11 @@ func (c *Client) authorizeInteractive(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := saveToken(c.cfg.TokenFile, tok); err != nil {
-		c.log.Warn("не удалось сохранить токен", "err", err)
+	if err := saveToken(c.tokenPath(), tok); err != nil {
+		// Не сохранили — Discord будет спрашивать согласие при каждом запуске.
+		c.log.Warn("не удалось сохранить токен", "path", c.tokenPath(), "err", err)
+	} else {
+		c.log.Info("токен Discord сохранён", "path", c.tokenPath())
 	}
 	return tok.AccessToken, nil
 }

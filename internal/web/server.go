@@ -39,6 +39,7 @@ func New(a *app.App, log *slog.Logger) *Server {
 	mux.HandleFunc("/api/test", s.handleTest)
 	mux.HandleFunc("/api/hyperhdr/info", s.handleHDRInfo)
 	mux.HandleFunc("/api/autostart", s.handleAutostart)
+	mux.HandleFunc("/api/cs2", s.handleCS2)
 	// TODO: /oauth/callback — если решим делать браузерный OAuth-флоу
 	// вместо RPC AUTHORIZE.
 
@@ -201,6 +202,32 @@ func (s *Server) handleTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleCS2: GET — состояние интеграции, POST — записать cfg в каталог игры.
+//
+// Ручка отдельная от /api/status, потому что для ответа приходится перечислять
+// процессы и читать файл в каталоге игры. Панель дёргает её только при
+// раскрытой плитке CS2, а не в общем опросе состояния.
+func (s *Server) handleCS2(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.app.CS2.Status())
+	case http.MethodPost:
+		st, err := s.app.CS2.Install()
+		if err != nil {
+			// Ошибку показываем в теле статуса: панели нужен связный ответ,
+			// а не голый 500 без пути и состояния файла.
+			st.Error = err.Error()
+			s.log.Warn("установка конфига CS2", "err", err)
+			writeJSON(w, http.StatusOK, st)
+			return
+		}
+		s.log.Info("конфиг CS2 установлен", "path", st.Path)
+		writeJSON(w, http.StatusOK, st)
+	default:
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *Server) handleHDRInfo(w http.ResponseWriter, r *http.Request) {

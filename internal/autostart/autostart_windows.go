@@ -22,6 +22,8 @@ func Supported() bool { return true }
 
 // Command собирает строку запуска: полный путь к exe и абсолютный путь к конфигу.
 // Абсолютный — потому что автозапуск стартует с произвольным рабочим каталогом.
+// Флаг -silent гасит открытие веб-панели: при входе в систему программа должна
+// молча сесть в трей, даже если web.open_on_start включён для ручного запуска.
 func Command(cfgPath string) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -38,6 +40,7 @@ func Command(cfgPath string) (string, error) {
 		}
 		cmd += " -config " + quote(abs)
 	}
+	cmd += " -silent"
 	return cmd, nil
 }
 

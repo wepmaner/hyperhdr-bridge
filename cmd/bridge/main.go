@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/ruslan/discord-hyperhdr-bridge/internal/app"
+	"github.com/ruslan/discord-hyperhdr-bridge/internal/autostart"
 	"github.com/ruslan/discord-hyperhdr-bridge/internal/config"
 	"github.com/ruslan/discord-hyperhdr-bridge/internal/console"
 	"github.com/ruslan/discord-hyperhdr-bridge/internal/tray"
@@ -23,7 +25,10 @@ func main() {
 	cfgPath := flag.String("config", "config.yaml", "путь к файлу конфигурации")
 	noTray := flag.Bool("no-tray", false, "запуск без иконки в трее (консольный режим)")
 	logPath := flag.String("log", "", "файл лога (по умолчанию bridge.log рядом с exe)")
+	silent := flag.Bool("silent", false, "не открывать веб-панель при запуске (режим автозапуска)")
 	flag.Parse()
+
+	*cfgPath = resolveConfigPath(*cfgPath)
 
 	logOut, logFile, closer := openLog(*logPath)
 	if closer != nil {
@@ -36,6 +41,16 @@ func main() {
 		os.Exit(1)
 	}
 	log := newLogger(cfg.LogLevel, logOut)
+	log.Info("запуск", "version", version)
+
+	// Запись автозапуска могла остаться от прошлой версии (без -silent) —
+	// приводим её к текущей строке запуска, иначе окно панели будет
+	// открываться при каждом входе в систему.
+	if updated, err := autostart.Refresh(*cfgPath); err != nil {
+		log.Warn("обновление записи автозапуска", "err", err)
+	} else if updated {
+		log.Info("запись автозапуска обновлена")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -62,7 +77,7 @@ func main() {
 				log.Error("веб-панель", "err", err)
 			}
 		}()
-		if cfg.Web.OpenOnStart {
+		if cfg.Web.OpenOnStart && !*silent {
 			tray.OpenBrowser("http://" + cfg.Web.Addr)
 		}
 	}
@@ -75,6 +90,23 @@ func main() {
 	}
 	<-done
 	log.Info("завершено")
+}
+
+// resolveConfigPath ищет конфиг рядом с программой, если относительный путь не
+// нашёлся в рабочем каталоге. При автозапуске рабочий каталог — System32,
+// и без этого мост читал бы (и создавал) конфиг не там, где ожидает человек.
+func resolveConfigPath(path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(filepath.Dir(exe), path)
 }
 
 func newLogger(level string, out io.Writer) *slog.Logger {

@@ -58,7 +58,10 @@ func (e *Engine) Config() config.Rules {
 func Match(cfg config.Rules, snap state.Snapshot) (string, config.Action) {
 	for _, name := range cfg.Order {
 		if snap.Has(state.Kind(name)) {
-			if act, ok := cfg.States[name]; ok {
+			// Выключенное правило не «гасит» подсветку, а уступает ход
+			// следующему в Order — иначе выключатель в панели вместо отказа
+			// от события просто оставлял бы ленту тёмной.
+			if act, ok := cfg.States[name]; ok && act.On() {
 				return name, act
 			}
 		}
@@ -111,7 +114,7 @@ func (e *Engine) run(ctx context.Context, act config.Action) error {
 		r, g, b := scale(act.Color[0], act.Brightness),
 			scale(act.Color[1], act.Brightness),
 			scale(act.Color[2], act.Brightness)
-		if act.BlinkCount > 0 {
+		if act.BlinkCount > 0 || act.Loop {
 			e.startBlink(ctx, act, r, g, b)
 			return nil
 		}
@@ -167,7 +170,9 @@ func (e *Engine) blink(ctx context.Context, act config.Action, r, g, b int) erro
 	on := blinkPhase(act.BlinkOnMS, defaultBlinkOnMS)
 	off := blinkPhase(act.BlinkOffMS, defaultBlinkOffMS)
 
-	for i := 0; i < act.BlinkCount; i++ {
+	// При Loop счётчик не ограничивает цикл: анимация живёт, пока состояние
+	// активно, и обрывается отменой контекста в stopBlink.
+	for i := 0; act.Loop || i < act.BlinkCount; i++ {
 		// duration = длительность вспышки: если нас прервут посередине,
 		// цвет погаснет сам, а не залипнет на ленте.
 		if err := e.hdr.SetColor(ctx, r, g, b, int(on/time.Millisecond)); err != nil {
@@ -232,7 +237,7 @@ func actionKey(name string, a config.Action) string {
 	if a.Hold != nil {
 		hold = *a.Hold
 	}
-	return fmt.Sprintf("%s|%s|%v|%s|%d|%d|%d/%d/%d|%t",
+	return fmt.Sprintf("%s|%s|%v|%s|%d|%d|%d/%d/%d|%t|%t",
 		name, a.Type, a.Color, a.Effect, a.DurationMS, a.Brightness,
-		a.BlinkCount, a.BlinkOnMS, a.BlinkOffMS, hold)
+		a.BlinkCount, a.BlinkOnMS, a.BlinkOffMS, hold, a.Loop)
 }

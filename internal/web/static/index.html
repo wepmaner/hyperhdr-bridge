@@ -27,11 +27,59 @@
   .switch input:checked + .track::after { transform:translateX(20px); }
   .switch input:disabled { cursor:not-allowed; }
   .switch input:disabled + .track { opacity:.4; }
+
+  /* Плитки интеграций. */
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; max-width:860px; }
+  .tile { background:#1e2128; border:1px solid #2b2f38; border-radius:10px; padding:12px 14px;
+    text-align:left; color:inherit; font:inherit; cursor:pointer; transition:border-color .15s, background .15s; }
+  .tile:hover { border-color:#3a4150; }
+  .tile.open { border-color:#4ade80; background:#20242c; }
+  .tile .name { font-size:16px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .tile .sub { color:#8b93a1; font-size:12px; margin-top:4px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:#6b7280; flex:none; }
+  .dot.ok { background:#4ade80; } .dot.warn { background:#fbbf24; } .dot.bad { background:#f87171; }
+  .details { max-width:860px; margin-top:12px; background:#1e2128; border:1px solid #2b2f38;
+    border-radius:10px; padding:14px; }
+  .details dl { display:grid; grid-template-columns:max-content 1fr; gap:6px 16px; margin:0; }
+  .details dt { color:#8b93a1; font-size:12px; text-transform:uppercase; letter-spacing:.04em; padding-top:2px; }
+  .details dd { margin:0; word-break:break-all; }
+  .notice { margin-top:12px; padding:10px 12px; border-radius:8px; background:#2a2415;
+    border:1px solid #4d3f16; color:#fbbf24; font-size:13px; }
+  .notice.bad { background:#2a1717; border-color:#5b2020; color:#f87171; }
+  button.act { margin-top:12px; background:#2f6fed; color:#fff; border:0; border-radius:8px;
+    padding:9px 14px; font:inherit; font-weight:600; cursor:pointer; }
+  button.act:hover { background:#3b7bf5; }
+  button.act:disabled { background:#3a3f4b; color:#8b93a1; cursor:not-allowed; }
+
+  /* Список событий. */
+  .evgroup { color:#8b93a1; font-size:12px; text-transform:uppercase; letter-spacing:.04em;
+    margin:16px 0 8px; }
+  .ev { display:flex; align-items:center; gap:12px; max-width:860px; background:#1e2128;
+    border:1px solid #2b2f38; border-radius:10px; padding:10px 14px; margin-bottom:8px; }
+  .ev.off { opacity:.55; }
+  .swatch { width:14px; height:14px; border-radius:4px; flex:none; border:1px solid #00000055; }
+  .ev .text { flex:1; min-width:0; }
+  .ev .name { font-weight:600; display:flex; align-items:center; gap:8px; }
+  .ev .desc { color:#8b93a1; font-size:12px; margin-top:2px; }
+  .live { font-size:11px; font-weight:600; color:#4ade80; border:1px solid #2c5c3c;
+    background:#16281d; border-radius:999px; padding:1px 7px; }
 </style>
 </head>
 <body>
 <h1>Discord → HyperHDR</h1>
-<div class="grid" id="cards"></div>
+
+<h1 style="margin-top:0">Интеграции</h1>
+<div class="tiles" id="tiles"></div>
+<div id="details"></div>
+
+<h1 style="margin-top:24px">События</h1>
+<div class="hint" style="margin-bottom:4px">
+  Выключенное событие не гасит ленту, а уступает ход следующему по приоритету.
+  Порядок сверху вниз — это и есть приоритет.
+</div>
+<div class="hint warn" id="ev-err" style="display:none"></div>
+<div id="events"></div>
+
 <h1 style="margin-top:24px">Настройки</h1>
 <div class="card row" style="max-width:860px">
   <div class="text">
@@ -48,46 +96,299 @@
 <pre id="raw">…</pre>
 
 <script>
-// TODO: редактор правил (цвет на состояние), кнопка «примерить», статус HyperHDR.
-const FIELDS = [
-  ['connected', 'В голосовом канале'],
-  ['self_mute', 'Микрофон выкл.'],
-  ['self_deaf', 'Звук выкл.'],
-  ['server_mute','Мут сервером'],
-  ['server_deaf','Заглушен сервером'],
-];
+// TODO: выбор цвета на событие, кнопка «примерить», статус HyperHDR.
+let snap = {};
 function render(s) {
-  document.getElementById('cards').innerHTML = FIELDS.map(([k, label]) =>
-    `<div class="card"><div class="k">${label}</div>
-     <div class="v ${s[k] ? 'on' : 'off'}">${s[k] ? 'да' : 'нет'}</div></div>`
-  ).join('');
+  snap = s;
   document.getElementById('raw').textContent = JSON.stringify(s, null, 2);
+  renderEvents();
 }
-// Автозапуск: состояние тянем с /api/autostart, переключаем POST-ом.
+
+// ── События ─────────────────────────────────────────────────────────────────
+// Порядок здесь только для показа; настоящий приоритет живёт в rules.order,
+// откуда список и сортируется.
+const EVENTS = {
+  cs2_dead: { group: 'CS2', name: 'Смерть',
+    desc: 'Два красных мигания и лента сразу возвращается HyperHDR',
+    live: (s) => s.cs2_dead },
+  cs2_bomb_exploded: { group: 'CS2', name: 'Бомба взорвалась',
+    desc: 'Ровный цвет без мигания на пару секунд. Взрыв мост вычисляет сам: игра о нём не сообщает',
+    live: (s) => s.cs2_bomb_exploded },
+  cs2_flashed: { group: 'CS2', name: 'Флешка',
+    desc: 'Белый, пока ослеплены. Порог не проверен на записи — по умолчанию выключено',
+    live: (s) => s.cs2_flashed },
+  cs2_bomb_panic: { group: 'CS2', name: 'Бомба: последние секунды',
+    desc: 'Частый оранжевый пульс', live: (s) => s.cs2_bomb_phase === 3 },
+  cs2_bomb_hurry: { group: 'CS2', name: 'Бомба: времени мало',
+    desc: 'Пульс вдвое быстрее', live: (s) => s.cs2_bomb_phase === 2 },
+  cs2_bomb: { group: 'CS2', name: 'Бомба заложена',
+    desc: 'Спокойный оранжевый пульс. Отсчёт мост ведёт сам: таймер игра не присылает',
+    live: (s) => s.cs2_bomb_phase === 1 },
+  deafened: { group: 'Discord', name: 'Звук выключен',
+    desc: 'Красный, пока включено глушение', live: (s) => s.self_deaf || s.server_deaf },
+  muted: { group: 'Discord', name: 'Микрофон выключен',
+    desc: 'Оранжевый, пока выключен микрофон', live: (s) => s.self_mute || s.server_mute },
+  connected: { group: 'Discord', name: 'В голосовом канале',
+    desc: 'Отдаёт ленту обычному источнику HyperHDR', live: (s) => s.connected },
+};
+
+let rulesCfg = null;
+
+function swatch(act) {
+  if (act.type !== 'color' || !Array.isArray(act.color)) return '';
+  const [r, g, b] = act.color;
+  return `<span class="swatch" style="background:rgb(${r},${g},${b})"></span>`;
+}
+
+function renderEvents() {
+  const box = document.getElementById('events');
+  if (!rulesCfg) { box.innerHTML = '<div class="hint">Загрузка…</div>'; return; }
+
+  const order = (rulesCfg.order || []).filter((k) => EVENTS[k]);
+  for (const k of Object.keys(EVENTS)) if (!order.includes(k)) order.push(k);
+
+  let html = '';
+  let group = null;
+  for (const key of order) {
+    const meta = EVENTS[key];
+    const act = (rulesCfg.states || {})[key];
+    if (!act) continue;
+    if (meta.group !== group) {
+      group = meta.group;
+      html += `<div class="evgroup">${esc(group)}</div>`;
+    }
+    const on = act.enabled === null || act.enabled === undefined || act.enabled === true;
+    const active = meta.live(snap);
+    html += `
+      <div class="ev ${on ? '' : 'off'}">
+        ${swatch(act)}
+        <div class="text">
+          <div class="name">${esc(meta.name)}${active ? '<span class="live">сейчас</span>' : ''}</div>
+          <div class="desc">${esc(meta.desc)}</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" data-ev="${key}" ${on ? 'checked' : ''}>
+          <span class="track"></span>
+        </label>
+      </div>`;
+  }
+  box.innerHTML = html;
+}
+
+function showEventError(msg) {
+  const el = document.getElementById('ev-err');
+  el.style.display = msg ? '' : 'none';
+  el.textContent = msg || '';
+}
+
+document.getElementById('events').addEventListener('change', async (e) => {
+  const key = e.target.dataset && e.target.dataset.ev;
+  if (!key || !rulesCfg) return;
+  const want = e.target.checked;
+  const prev = rulesCfg.states[key].enabled;
+  rulesCfg.states[key].enabled = want;
+  showEventError('');
+  try {
+    const r = await fetch('/api/rules', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rulesCfg),
+    });
+    if (!r.ok) throw new Error((await r.text()).trim());
+  } catch (err) {
+    rulesCfg.states[key].enabled = prev; // не сохранилось — возвращаем как было
+    showEventError('Не удалось сохранить: ' + err.message);
+  }
+  renderEvents();
+});
+
+async function loadRules() {
+  try {
+    rulesCfg = await (await fetch('/api/rules')).json();
+  } catch (e) {
+    showEventError('Не удалось получить правила от моста.');
+  }
+  renderEvents();
+}
+
+const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ── Интеграции ──────────────────────────────────────────────────────────────
+// Плитка CS2 опрашивается только раскрытой: для ответа мост перечисляет
+// процессы и читает файл в каталоге игры, и делать это постоянно незачем.
+let open = null;          // какая плитка раскрыта
+let cs2Timer = null;      // опрос, пока раскрыта CS2
+const st = { discord: null, cs2: null };
+
+const DISCORD_LABEL = {
+  authenticated: 'Подключён',
+  handshaked: 'Рукопожатие выполнено',
+  connecting: 'Подключение…',
+  disconnected: 'Не подключён',
+};
+
+function discordTile() {
+  const d = st.discord;
+  if (!d) return { dot: '', sub: 'Загрузка…' };
+  const label = DISCORD_LABEL[d.status] || d.status;
+  if (d.status === 'authenticated') return { dot: 'ok', sub: d.user ? 'Подключён, ' + d.user : label };
+  if (d.error) return { dot: 'bad', sub: label };
+  return { dot: 'warn', sub: label };
+}
+
+function cs2Tile() {
+  const c = st.cs2;
+  if (!c) return { dot: '', sub: 'Загрузка…' };
+  if (!c.supported) return { dot: '', sub: 'Только в Windows' };
+  if (!c.installed) return { dot: 'warn', sub: 'Конфиг не установлен' };
+  if (c.stale) return { dot: 'warn', sub: 'Конфиг устарел' };
+  if (c.seen_data) return { dot: 'ok', sub: 'Данные от игры идут' };
+  if (c.running) return { dot: 'warn', sub: 'Игра запущена, данных нет' };
+  return { dot: 'ok', sub: 'Готово, ждёт игру' };
+}
+
+function renderTiles() {
+  const items = [
+    { id: 'discord', name: 'Discord', ...discordTile() },
+    { id: 'cs2', name: 'CS2', ...cs2Tile() },
+  ];
+  document.getElementById('tiles').innerHTML = items.map((it) => `
+    <button class="tile ${open === it.id ? 'open' : ''}" data-id="${it.id}">
+      <div class="name"><span class="dot ${it.dot}"></span>${esc(it.name)}</div>
+      <div class="sub">${esc(it.sub)}</div>
+    </button>`).join('');
+  renderDetails();
+}
+
+function renderDetails() {
+  const box = document.getElementById('details');
+  if (!open) { box.innerHTML = ''; return; }
+  box.innerHTML = open === 'discord' ? discordDetails() : cs2Details();
+  const btn = box.querySelector('#cs2-install');
+  if (btn) btn.addEventListener('click', installCS2);
+}
+
+function discordDetails() {
+  const d = st.discord || {};
+  return `<div class="details"><dl>
+    <dt>Статус</dt><dd>${esc(DISCORD_LABEL[d.status] || d.status || '—')}</dd>
+    <dt>Пользователь</dt><dd>${esc(d.user || '—')}</dd>
+  </dl>${d.error ? `<div class="notice bad">${esc(d.error)}</div>` : ''}</div>`;
+}
+
+function cs2Details() {
+  const c = st.cs2 || {};
+  if (!c.supported) {
+    return `<div class="details">Поиск Steam и определение запущенной игры реализованы
+      только в Windows. Слушатель при этом работает: положите
+      gamestate_integration-файл руками и укажите каталог в <code>cs2.cfg_path</code>.</div>`;
+  }
+
+  let cfgState = 'не установлен';
+  if (c.error && !c.dir) cfgState = 'каталог игры не найден';
+  else if (c.stale) cfgState = 'устарел — адрес или токен изменились';
+  else if (c.installed) cfgState = 'установлен';
+
+  const listener = c.listening
+    ? `${esc(c.addr)}, ${c.seen_data ? 'данные от игры приходили' : 'данных ещё не было'}`
+    : `${esc(c.addr)} — не слушает`;
+
+  let notice = '';
+  if (c.needs_restart) {
+    notice = `<div class="notice">CS2 сейчас запущен. Конфиг читается только при старте игры —
+      выйдите из CS2 и запустите заново, чтобы он применился.</div>`;
+  }
+  let errBox = '';
+  if (c.error) {
+    errBox = `<div class="notice bad">${esc(c.error)}${c.dir ? '' :
+      '<br>Укажите каталог cfg игры в <code>cs2.cfg_path</code> конфига моста.'}</div>`;
+  }
+
+  const button = c.dir
+    ? `<button class="act" id="cs2-install">${c.installed && !c.stale
+        ? 'Переустановить конфиг' : c.stale ? 'Обновить конфиг' : 'Установить конфиг'}</button>`
+    : '';
+
+  return `<div class="details"><dl>
+    <dt>Путь к игре</dt><dd>${esc(c.dir || '—')}</dd>
+    <dt>Конфиг GSI</dt><dd>${esc(cfgState)}${c.path ? `<div class="hint">${esc(c.path)}</div>` : ''}</dd>
+    <dt>Слушатель</dt><dd>${listener}</dd>
+    <dt>Игра</dt><dd>${c.running ? 'запущена' : 'не запущена'}</dd>
+  </dl>${notice}${errBox}${button}</div>`;
+}
+
+async function installCS2() {
+  const btn = document.getElementById('cs2-install');
+  btn.disabled = true;
+  btn.textContent = 'Устанавливаю…';
+  try {
+    const r = await fetch('/api/cs2', { method: 'POST' });
+    if (!r.ok) throw new Error((await r.text()).trim());
+    st.cs2 = await r.json();
+  } catch (e) {
+    st.cs2 = Object.assign({}, st.cs2, { error: 'Не удалось записать конфиг: ' + e.message });
+  }
+  renderTiles();
+}
+
+async function loadCS2() {
+  try {
+    st.cs2 = await (await fetch('/api/cs2')).json();
+  } catch (e) {
+    st.cs2 = { supported: true, addr: '', error: 'Мост не отвечает на /api/cs2' };
+  }
+  renderTiles();
+}
+
+async function loadStatus() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    st.discord = s.discord;
+  } catch (e) { /* панель переживёт один пропущенный опрос */ }
+  renderTiles();
+}
+
+document.getElementById('tiles').addEventListener('click', (e) => {
+  const tile = e.target.closest('.tile');
+  if (!tile) return;
+  open = open === tile.dataset.id ? null : tile.dataset.id;
+  clearInterval(cs2Timer);
+  cs2Timer = null;
+  if (open === 'cs2') {
+    loadCS2();
+    cs2Timer = setInterval(loadCS2, 3000);
+  }
+  renderTiles();
+});
+
+// ── Автозапуск ──────────────────────────────────────────────────────────────
 const auto = document.getElementById('auto');
 const autoHint = document.getElementById('auto-hint');
 
-function renderAuto(st) {
-  if (!st.supported) {
+// Параметр называется a, а не st: глобальный st — состояние плиток интеграций.
+function renderAuto(a) {
+  if (!a) return;
+  if (!a.supported) {
     auto.checked = false;
     auto.disabled = true;
     autoHint.className = 'hint';
     autoHint.textContent = 'Автозапуск доступен только в Windows.';
     return;
   }
-  auto.checked = st.enabled;
+  auto.checked = a.enabled;
   auto.disabled = false;
-  if (st.error) {
+  if (a.error) {
     autoHint.className = 'hint warn';
-    autoHint.textContent = 'Ошибка: ' + st.error;
-  } else if (st.stale) {
+    autoHint.textContent = 'Ошибка: ' + a.error;
+  } else if (a.stale) {
     autoHint.className = 'hint warn';
-    autoHint.textContent = 'В автозапуске прописана другая копия программы: ' + st.command +
+    autoHint.textContent = 'В автозапуске прописана другая копия программы: ' + a.command +
       '. Выключите и включите переключатель, чтобы обновить запись.';
   } else {
     autoHint.className = 'hint';
-    autoHint.textContent = st.enabled
-      ? 'Прописано в автозапуске: ' + st.command
+    autoHint.textContent = a.enabled
+      ? 'Прописано в автозапуске: ' + a.command
       : 'Мост придётся запускать вручную.';
   }
 }
@@ -121,6 +422,11 @@ auto.addEventListener('change', async () => {
 });
 
 loadAuto();
+loadStatus();
+loadRules();
+loadCS2();          // один раз при загрузке, чтобы плитка знала своё состояние
+setInterval(loadStatus, 5000);
+renderTiles();
 
 const es = new EventSource('/api/events');
 es.onmessage = (e) => render(JSON.parse(e.data));
