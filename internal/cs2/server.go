@@ -222,6 +222,15 @@ func (s *Server) Config() config.CS2 {
 	return s.cfg
 }
 
+// Update меняет секцию конфига на лету (из панели) и возвращает результат.
+// Адрес слушателя так не сменить: он читается один раз в Run.
+func (s *Server) Update(mut func(*config.CS2)) config.CS2 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	mut(&s.cfg)
+	return s.cfg
+}
+
 // Status собирает полную картину для панели: слушатель, файл конфигурации игры
 // и запущена ли сама игра.
 func (s *Server) Status() Status {

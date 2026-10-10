@@ -55,6 +55,9 @@ type Detector struct {
 
 	live    bool
 	flashed bool
+	// spectating — последний кадр был про другого игрока: мы мертвы и смотрим
+	// за командой.
+	spectating bool
 }
 
 func NewDetector(cfg config.CS2) *Detector {
@@ -68,11 +71,13 @@ func (d *Detector) Feed(p *Payload, now time.Time) Signals {
 	d.live = own != nil && p.Player.Activity == "playing" &&
 		p.Map != nil && p.Map.Phase == "live"
 
+	d.spectating = false
 	switch {
 	case own != nil:
 		d.flashed = own.Flashed >= d.cfg.FlashThreshold
 		d.feedHealth(own.Health, now)
 	case p.Player != nil && p.Player.State != nil:
+		d.spectating = true
 		// Кадр про другого игрока: мы за ним наблюдаем. Историю здоровья не
 		// трогаем вовсе — иначе его респавн прочитается как наша жизнь, а его
 		// смерть как наша.
@@ -126,13 +131,19 @@ func (d *Detector) Tick(now time.Time) Signals {
 
 func (d *Detector) derive(now time.Time) Signals {
 	d.advance(now)
-	return Signals{
+	sig := Signals{
 		Live:      d.live,
 		Dead:      now.Before(d.deadUntil),
 		Flashed:   d.flashed,
 		BombPhase: d.bombPhase(now),
 		Exploded:  now.Before(d.explodedUntil),
 	}
+	if d.spectating && !d.cfg.ReactWhenSpectating {
+		// Отсчёт бомбы продолжается, гасим только сигнал: если переключатель
+		// вернут или начнётся новый раунд, фаза окажется верной сразу.
+		sig.BombPhase, sig.Exploded = 0, false
+	}
+	return sig
 }
 
 // advance переводит догоревшую бомбу во взрыв. Вынесено из bombPhase, потому
@@ -171,5 +182,5 @@ func (d *Detector) reset() {
 	d.deadUntil = time.Time{}
 	d.planted = false
 	d.explodedUntil = time.Time{}
-	d.live, d.flashed = false, false
+	d.live, d.flashed, d.spectating = false, false, false
 }

@@ -40,6 +40,13 @@ func NewTracker(cfg config.CS2, log *slog.Logger) *Tracker {
 	return &Tracker{det: NewDetector(cfg), log: log, interval: tickInterval}
 }
 
+// SetConfig подменяет настройки детектора на лету (из панели).
+func (t *Tracker) SetConfig(cfg config.CS2) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.det.cfg = cfg
+}
+
 // Frame разбирает и скармливает детектору очередной снимок.
 func (t *Tracker) Frame(raw []byte) {
 	var p Payload

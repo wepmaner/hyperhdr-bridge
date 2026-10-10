@@ -33,6 +33,17 @@ rules:
   # speaking сознательно не используется: Discord дёргает SPEAKING_START/STOP
   # на каждой паузе в речи, подсветка от этого мигает.
   order: [deafened, muted, connected]
+  # Свет для каждого события удобнее собирать в панели (раздел «События» →
+  # «Настроить»): она пишет сюда последовательность шагов, например
+  #   muted:
+  #     type: seq
+  #     seq:
+  #       end: hold            # hold — гореть, return — вернуть ленту, loop — по кругу
+  #       steps:
+  #         - {type: color, ms: 150, color: "#FF7A00", brightness: 100}
+  #         - {type: pause, ms: 150}     # в паузе видно обычный захват экрана
+  #         - {type: color, ms: 150, color: "#FF7A00"}
+  # Короткая запись ниже (type: color + blink_*) тоже работает.
   states:
     # blink_count: мигнуть цветом N раз (в паузах видно обычный захват экрана),
     # после чего цвет остаётся гореть, пока состояние активно.
@@ -40,15 +51,15 @@ rules:
     deafened:
       type: color
       color: [255, 0, 0]
-      blink_count: 1
-      blink_on_ms: 220
-      blink_off_ms: 180
+      blink_count: 2
+      blink_on_ms: 150
+      blink_off_ms: 150
     muted:
       type: color
       color: [255, 140, 0]
-      blink_count: 1
-      blink_on_ms: 220
-      blink_off_ms: 180
+      blink_count: 2
+      blink_on_ms: 150
+      blink_off_ms: 150
     # Просто «в канале» подсветку не занимаем — HyperHDR работает как обычно.
     connected:
       type: clear

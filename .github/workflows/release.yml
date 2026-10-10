@@ -26,6 +26,20 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Панель
+        # Собранная панель лежит в репозитории, но релиз не должен зависеть от
+        # того, не забыли ли её пересобрать перед коммитом.
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
       - name: Сборка
         run: |
           VERSION="${GITHUB_REF_NAME#v}"

@@ -1,0 +1,14 @@
+/* Дополнения к panel.css (он перенесён из макета как есть): то, чего в макете
+   не было, потому что там данные были заглушками. */
+body{margin:0;background:#0E131A}
+.app{font-family:'Onest Variable','Onest','Segoe UI',system-ui,sans-serif}
+.boot{margin:auto;padding:40px;color:var(--mut);font-size:15px;text-align:center}
+.toast.err{background:#FBD3D9}
+.toast.err .ic{color:#B4232F}
+/* Правка адреса HyperHDR и папки игры прямо в строке настройки. */
+.set-edit{align-items:flex-end;flex-wrap:wrap}
+.edit-row{display:flex;gap:10px;align-items:flex-end;margin:10px 0 6px}
+.edit-field{display:flex;flex-direction:column;gap:4px}
+.edit-field .inp[type=number]{width:110px}
+.set-warn{color:var(--warn);margin-top:6px}
+.switch:disabled{opacity:.4;cursor:not-allowed}

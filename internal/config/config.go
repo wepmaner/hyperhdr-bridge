@@ -58,6 +58,9 @@ type CS2 struct {
 	// BombExplodedHoldMS — сколько держать цвет взрыва. Взрыв игра тоже не
 	// сообщает: его вычисляет детектор, когда фитиль догорел до конца.
 	BombExplodedHoldMS int `yaml:"bomb_exploded_hold_ms"`
+	// ReactWhenSpectating — реагировать на бомбу, пока после смерти смотришь
+	// за командой. Выключено — бомба светит, только пока играешь сам.
+	ReactWhenSpectating bool `yaml:"react_when_spectating"`
 }
 
 // Discord — параметры OAuth2/RPC приложения Discord.
@@ -80,6 +83,9 @@ type Discord struct {
 	TokenPath string `yaml:"-" json:"-"`
 	// PipeRange — сколько IPC-сокетов перебирать (discord-ipc-0..N).
 	PipeRange int `yaml:"pipe_range"`
+	// AutoConnect — подключаться к Discord самому и переподключаться после
+	// обрыва. Выключено — только по кнопке «Переподключить» в панели.
+	AutoConnect bool `yaml:"auto_connect"`
 }
 
 // HyperHDR — как достучаться до HyperHDR.
@@ -125,8 +131,12 @@ type Action struct {
 	// конфиги, где поля нет, перестали бы работать после обновления моста.
 	// Выключенное состояние пропускается, и ход переходит следующему в Order.
 	Enabled *bool `yaml:"enabled,omitempty" json:"enabled"`
-	// Type: color | effect | clear | none
+	// Type: seq | color | effect | clear | none
 	Type string `yaml:"type" json:"type"`
+	// Seq — световая последовательность (type=seq): её пишет редактор панели.
+	// Правила color и clear старого формата переводятся в неё на лету,
+	// см. Action.Sequence.
+	Seq *Sequence `yaml:"seq,omitempty" json:"seq,omitempty"`
 	// Color в формате [R,G,B] для type=color.
 	Color []int `yaml:"color,omitempty" json:"color,omitempty"`
 	// Effect — имя эффекта HyperHDR для type=effect.
@@ -253,6 +263,7 @@ func Default() *Config {
 			Scopes:      []string{"rpc", "rpc.voice.read"},
 			TokenFile:   "token.json",
 			PipeRange:   10,
+			AutoConnect: true,
 		},
 		HyperHDR: HyperHDR{
 			Host:          "127.0.0.1",
@@ -272,7 +283,8 @@ func Default() *Config {
 			BombHurryS:     20,
 			BombPanicS:     5,
 
-			BombExplodedHoldMS: 2000,
+			BombExplodedHoldMS:  2000,
+			ReactWhenSpectating: true,
 		},
 		Web: Web{Enabled: true, Addr: "127.0.0.1:7788"},
 		Rules: Rules{
@@ -355,21 +367,19 @@ func (c *Config) Validate() error {
 }
 
 // validateDeathHold следит, чтобы признак смерти жил не меньше собственной
-// анимации. Иначе состояние сменится посреди мигания, stopBlink оборвёт его,
+// анимации. Иначе состояние сменится посреди мигания, движок оборвёт его,
 // и вместо двух вспышек человек увидит одну с половиной.
 func (c *Config) validateDeathHold() error {
 	act, ok := c.Rules.States["cs2_dead"]
-	if !ok || !c.CS2.Enabled || !act.On() || act.BlinkCount <= 0 {
+	if !ok || !c.CS2.Enabled || !act.On() {
 		return nil
 	}
-	on, off := act.BlinkOnMS, act.BlinkOffMS
-	if on <= 0 {
-		on = 220 // те же значения по умолчанию, что в rules
+	seq, ok := act.Sequence()
+	// Цикл длины не имеет: он и так живёт ровно столько, сколько признак.
+	if !ok || seq.End == EndLoop {
+		return nil
 	}
-	if off <= 0 {
-		off = 180
-	}
-	if need := act.BlinkCount * (on + off); c.CS2.DeathHoldMS < need {
+	if need := seq.Total(); c.CS2.DeathHoldMS < need {
 		return fmt.Errorf(
 			"cs2.death_hold_ms (%d) меньше длительности анимации cs2_dead (%d мс): "+
 				"мигание оборвётся на середине", c.CS2.DeathHoldMS, need)
@@ -411,8 +421,16 @@ func (c CS2) validate() error {
 // defaultStates собирает правила по умолчанию: состояния Discord плюс события CS2.
 func defaultStates() map[string]Action {
 	states := map[string]Action{
-		"deafened": {Type: "color", Color: []int{255, 0, 0}, BlinkCount: 1},
-		"muted":    {Type: "color", Color: []int{255, 140, 0}, BlinkCount: 1},
+		// Два быстрых мигания и цвет остаётся гореть. Одну вспышку глаз не
+		// отличает от простого включения цвета, а медленные задерживают сигнал.
+		"deafened": {
+			Type: "color", Color: []int{255, 0, 0},
+			BlinkCount: 2, BlinkOnMS: 150, BlinkOffMS: 150,
+		},
+		"muted": {
+			Type: "color", Color: []int{255, 140, 0},
+			BlinkCount: 2, BlinkOnMS: 150, BlinkOffMS: 150,
+		},
 		// В канале, но без мута — не мешаем HyperHDR делать своё дело.
 		"connected": {Type: "clear"},
 	}

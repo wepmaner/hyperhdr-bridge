@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -29,7 +30,29 @@ func New(cfg config.HyperHDR, log *slog.Logger) *Client {
 }
 
 func (c *Client) addr() string {
-	return fmt.Sprintf("%s:%d", c.cfg.Host, c.cfg.JSONPort)
+	return net.JoinHostPort(c.cfg.Host, strconv.Itoa(c.cfg.JSONPort))
+}
+
+// Config возвращает текущие параметры подключения.
+func (c *Client) Config() config.HyperHDR {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cfg
+}
+
+// SetTarget меняет адрес HyperHDR на лету (из панели). Старое соединение
+// закрывается, новое поднимется при следующей команде.
+func (c *Client) SetTarget(host string, port int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dropLocked()
+	c.cfg.Host, c.cfg.JSONPort = host, port
+}
+
+// Ping проверяет, отвечает ли HyperHDR.
+func (c *Client) Ping(ctx context.Context) error {
+	_, err := c.send(ctx, Request{Command: "serverinfo"})
+	return err
 }
 
 // connect устанавливает соединение и при необходимости логинится токеном.
@@ -37,7 +60,9 @@ func (c *Client) connect(ctx context.Context) error {
 	if c.conn != nil {
 		return nil
 	}
-	d := net.Dialer{Timeout: 3 * time.Second}
+	// Секунды хватает с запасом: HyperHDR живёт на этой машине или в локальной
+	// сети, а панель проверяет связь регулярно и не должна подолгу висеть.
+	d := net.Dialer{Timeout: time.Second}
 	conn, err := d.DialContext(ctx, "tcp", c.addr())
 	if err != nil {
 		return fmt.Errorf("подключение к HyperHDR %s: %w", c.addr(), err)

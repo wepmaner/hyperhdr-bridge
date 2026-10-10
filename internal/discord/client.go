@@ -55,6 +55,8 @@ type Client struct {
 	ready    chan ReadyData          // сигнал READY текущей сессии
 	chanSel  chan []byte             // очередь VOICE_CHANNEL_SELECT
 	curChan  string                  // канал, на события которого мы подписаны
+	// kick будит Run: подключиться сейчас, не дожидаясь паузы между попытками.
+	kick chan struct{}
 }
 
 func NewClient(cfg config.Discord, log *slog.Logger) *Client {
@@ -64,7 +66,40 @@ func NewClient(cfg config.Discord, log *slog.Logger) *Client {
 		events:  make(chan Event, 64),
 		status:  StatusDisconnected,
 		pending: make(map[string]chan Payload),
+		kick:    make(chan struct{}, 1),
 	}
+}
+
+// Reconnect рвёт текущую сессию и подключается заново, не дожидаясь паузы
+// между попытками. Кнопка «Переподключить» в панели.
+func (c *Client) Reconnect() {
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
+	select {
+	case c.kick <- struct{}{}:
+	default: // сигнал уже ждёт
+	}
+}
+
+// SetAutoConnect включает и выключает самостоятельное подключение.
+func (c *Client) SetAutoConnect(on bool) {
+	c.mu.Lock()
+	c.cfg.AutoConnect = on
+	c.mu.Unlock()
+	if on {
+		c.Reconnect()
+	}
+}
+
+// AutoConnect сообщает, подключается ли клиент сам.
+func (c *Client) AutoConnect() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cfg.AutoConnect
 }
 
 // Events — поток событий для потребителя.
@@ -99,31 +134,45 @@ func (c *Client) setStatus(s Status, err error) {
 func (c *Client) Run(ctx context.Context) error {
 	const maxBackoff = 30 * time.Second
 	backoff := time.Second
+	// manual — подключение запросили кнопкой: оно выполняется и при
+	// выключенном автоподключении.
+	manual := false
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		if !manual && !c.AutoConnect() {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-c.kick:
+			}
+		}
+		manual = false
 		c.setStatus(StatusConnecting, nil)
 		err := c.session(ctx)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		c.setStatus(StatusDisconnected, err)
+		// Ошибку авторизации повтор не вылечит: ждём, пока человек нажмёт
+		// «Переподключить», вместо того чтобы стучаться к Discord по кругу.
+		retry := time.After(backoff)
 		if errors.Is(err, ErrNotAuthorized) {
-			// Ошибка конфигурации: переподключение её не вылечит.
 			c.log.Error("Discord: нужна настройка", "err", err)
-			return err
-		}
-		if err != nil {
+			retry = nil
+		} else if err != nil {
 			c.log.Warn("сессия Discord прервана", "err", err, "retry_in", backoff)
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(backoff):
-		}
-		if backoff < maxBackoff {
-			backoff *= 2
+		case <-retry:
+			if backoff < maxBackoff {
+				backoff *= 2
+			}
+		case <-c.kick:
+			manual, backoff = true, time.Second
 		}
 	}
 }

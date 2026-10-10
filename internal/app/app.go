@@ -4,11 +4,13 @@ package app
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/ruslan/discord-hyperhdr-bridge/internal/config"
 	"github.com/ruslan/discord-hyperhdr-bridge/internal/cs2"
 	"github.com/ruslan/discord-hyperhdr-bridge/internal/discord"
 	"github.com/ruslan/discord-hyperhdr-bridge/internal/hyperhdr"
+	"github.com/ruslan/discord-hyperhdr-bridge/internal/presets"
 	"github.com/ruslan/discord-hyperhdr-bridge/internal/rules"
 	"github.com/ruslan/discord-hyperhdr-bridge/internal/state"
 )
@@ -28,6 +30,9 @@ type App struct {
 	CS2Track *cs2.Tracker
 	Rules    *rules.Engine
 	State    *state.Store
+	// Presets — библиотека световых последовательностей (presets.json рядом
+	// с конфигом).
+	Presets *presets.Store
 }
 
 func New(cfg *config.Config, cfgPath string, log *slog.Logger) *App {
@@ -42,6 +47,7 @@ func New(cfg *config.Config, cfgPath string, log *slog.Logger) *App {
 		CS2Track: cs2.NewTracker(cfg.CS2, log.With("mod", "cs2")),
 		Rules:    rules.New(cfg.Rules, hdr, log.With("mod", "rules")),
 		State:    state.New(),
+		Presets:  presets.Open(filepath.Join(filepath.Dir(cfgPath), "presets.json"), log.With("mod", "presets")),
 	}
 	// Слушатель отдаёт сырые кадры трекеру, а тот — уже готовые признаки
 	// в общий снимок состояния. Правила про CS2 по-прежнему ничего не знают.
@@ -83,6 +89,7 @@ func (a *App) Run(ctx context.Context) error {
 	go a.applyLoop(ctx)
 
 	<-ctx.Done()
+	a.Rules.Stop()
 	shutdown, cancel := context.WithTimeout(context.Background(), defaultShutdown)
 	defer cancel()
 	return a.HDR.Close(shutdown)
@@ -127,5 +134,7 @@ func (a *App) applyLoop(ctx context.Context) {
 func (a *App) SaveConfig() error {
 	a.Cfg.Rules = a.Rules.Config()
 	a.Cfg.CS2 = a.CS2.Config()
+	a.Cfg.HyperHDR = a.HDR.Config()
+	a.Cfg.Discord.AutoConnect = a.Discord.AutoConnect()
 	return config.Save(a.CfgPath, a.Cfg)
 }
